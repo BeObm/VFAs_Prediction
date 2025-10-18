@@ -15,6 +15,10 @@ It automatically:
 
 Before running the code, you need to have Python 3.8 or newer installed.
 
+If you don’t have Python yet:
+- Download and install it from [python.org/downloads](https://www.python.org/downloads/)
+- During installation, **check the box** that says *“Add Python to PATH”*
+
 
 
 ## Step 1 — Install the Required Libraries
