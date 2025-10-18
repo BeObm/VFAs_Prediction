@@ -83,7 +83,6 @@ After the script runs, you will find everything inside the folder you set in `--
 | `shap_feature_importance_<model>.pdf` | SHAP feature importance bar chart |
 | `result_sumary.xlsx` | Excel file summarizing model metrics |
 | `*.png` plots | Prediction vs. Ground Truth comparison |
-| Console output | Shows training progress and final metrics |
 
 
 ## Example Folder Structure After Running
