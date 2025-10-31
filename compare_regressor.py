@@ -1,15 +1,20 @@
+from tqdm import tqdm
 import pandas as pd
 import numpy as np
 import warnings
 import matplotlib.pyplot as plt
 import os
+from scipy.stats import pearsonr, kendalltau
 
 warnings.filterwarnings("ignore")
-from tqdm import tqdm
+
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler, OneHotEncoder
 from sklearn.compose import ColumnTransformer
-from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
+from sklearn.metrics import (
+    mean_squared_error, mean_absolute_error, r2_score,
+    max_error, mean_absolute_percentage_error, explained_variance_score
+)
 
 # Regressors
 from sklearn.linear_model import (
@@ -25,7 +30,7 @@ from sklearn.ensemble import (
 from sklearn.neighbors import KNeighborsRegressor
 from sklearn.neural_network import MLPRegressor
 
-# Optional imports
+# Optional: XGBoost / LightGBM
 try:
     from xgboost import XGBRegressor
     XGB_AVAILABLE = True
@@ -54,8 +59,6 @@ def preprocess_data(X, y):
     cat_cols = X.select_dtypes(include=["object", "category"]).columns.tolist()
     num_cols = X.select_dtypes(exclude=["object", "category"]).columns.tolist()
 
-    print(f"Found {len(cat_cols)} categorical columns and {len(num_cols)} numeric columns.")
-
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
 
     preprocessor = ColumnTransformer(
@@ -67,20 +70,34 @@ def preprocess_data(X, y):
 
     X_train = preprocessor.fit_transform(X_train)
     X_test = preprocessor.transform(X_test)
+
+    print(f"Data prepared for modeling. Final feature space: {X_train.shape[1]} features.\n")
     return X_train, X_test, y_train, y_test
 
 
 def evaluate_and_plot(model, name, X_train, X_test, y_train, y_test, save_dir="model_plots"):
-    """Train, evaluate, and plot predicted vs. true values."""
+    """Train, evaluate, compute metrics, and plot predicted vs true."""
     model.fit(X_train, y_train)
     y_pred = model.predict(X_test)
 
-    rmse = np.sqrt(mean_squared_error(y_test, y_pred))
+    # Basic regression metrics
+    mse = mean_squared_error(y_test, y_pred)
+    rmse = np.sqrt(mse)
     mae = mean_absolute_error(y_test, y_pred)
+    mape = mean_absolute_percentage_error(y_test, y_pred)
+    max_err = max_error(y_test, y_pred)
     r2 = r2_score(y_test, y_pred)
-    #
-    # print(f"********{name} *******")
-    # print(f"   RMSE: {rmse:.4f} | MAE: {mae:.4f} | R²: {r2:.4f}\n")
+    evs = explained_variance_score(y_test, y_pred)
+
+    # Correlation metrics
+    try:
+        pearson_corr, _ = pearsonr(y_test, y_pred)
+    except Exception:
+        pearson_corr = np.nan
+    try:
+        kendall_corr, _ = kendalltau(y_test, y_pred)
+    except Exception:
+        kendall_corr = np.nan
 
     # Plot predicted vs true
     os.makedirs(save_dir, exist_ok=True)
@@ -94,7 +111,17 @@ def evaluate_and_plot(model, name, X_train, X_test, y_train, y_test, save_dir="m
     plt.savefig(f"{save_dir}/{name}_pred_vs_true.png", dpi=120)
     plt.close()
 
-    return {"RMSE": rmse, "MAE": mae, "R2": r2}
+    return {
+        "MSE": mse,
+        "RMSE": rmse,
+        "MAE": mae,
+        "MAPE": mape,
+        "MaxError": max_err,
+        "R2": r2,
+        "ExplainedVar": evs,
+        "Pearson": pearson_corr,
+        "Kendall": kendall_corr
+    }
 
 
 def main(csv_path, target_column):
@@ -129,7 +156,7 @@ def main(csv_path, target_column):
     if LGB_AVAILABLE:
         regressors["LGBMRegressor"] = LGBMRegressor()
 
-    print("Training and evaluating models...\n")
+    print("🔹 Training and evaluating models...\n")
     results = {}
     for name, model in tqdm(regressors.items()):
         try:
@@ -138,13 +165,36 @@ def main(csv_path, target_column):
             print(f" {name} failed: {e}\n")
 
     # Results summary
-    print("\n Summary of all models:")
+    print("\nSummary of all models:")
     df_results = pd.DataFrame(results).T.sort_values("R2", ascending=False)
     print(df_results.round(4))
 
+    # Save results
     df_results.to_csv("regression_model_comparison_results.csv")
-    print("\n Results saved to 'regression_model_comparison_results.csv'")
+    print("\nResults saved to 'regression_model_comparison_results.csv'")
     print("Plots saved to 'model_plots/' folder.")
+
+    # R² bar chart
+    plt.figure(figsize=(10, 6))
+    df_results["R2"].plot(kind="barh", color="skyblue")
+    plt.title("Model Comparison (R² Score)")
+    plt.xlabel("R² Score")
+    plt.tight_layout()
+    plt.savefig("model_r2_comparison.png", dpi=120)
+    plt.close()
+    print("Summary R² comparison plot saved as 'model_r2_comparison.png'.")
+
+    # Optional: heatmap of all metrics
+    plt.figure(figsize=(12, 6))
+    plt.imshow(df_results.corr(), cmap="coolwarm", interpolation="nearest")
+    plt.colorbar(label="Correlation")
+    plt.xticks(range(len(df_results.columns)), df_results.columns, rotation=45, ha="right")
+    plt.yticks(range(len(df_results.columns)), df_results.columns)
+    plt.title("Metrics Correlation Heatmap (Across Models)")
+    plt.tight_layout()
+    plt.savefig("metrics_correlation_heatmap.png", dpi=120)
+    plt.close()
+    print("Metrics correlation heatmap saved as 'metrics_correlation_heatmap.png'.")
 
 
 
