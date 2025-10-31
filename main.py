@@ -15,6 +15,8 @@ def main(args):
     val_loader = DataLoader(MyDataset(X_val, y_val,type_model=args.type_model), batch_size=args.batch_size)
     if args.type_model == "mlp":
         model_full = MLPRegressor(in_features=X.shape[1])
+    elif args.type_model == "deep_mlp":
+        model_full = DeepMLPRegressor(in_features=X.shape[1])
     elif args.type_model == "cnn":
         model_full = CNNRegressor(input_features=X.shape[1])
 
@@ -37,6 +39,8 @@ def main(args):
 
     if args.type_model == "mlp":
         model_top = MLPRegressor(in_features=X_top.shape[1])
+    elif args.type_model == "deep_mlp":
+        model_top = DeepMLPRegressor(in_features=X_top.shape[1])
     elif args.type_model == "cnn":
         model_top = CNNRegressor(input_features=X_top.shape[1])
 
@@ -69,16 +73,17 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
     parser.add_argument("--dataset", default="01_VFAs_dataset_imputed.csv", help="path to dataset file")
-    parser.add_argument("--type_model", default="mlp", help="type of model", choices=["mlp", "cnn"])
-    parser.add_argument("--output_dir", default="MLP-Output", help="path to save results")
+    parser.add_argument("--type_model", default="deep_mlp", help="type of model", choices=["mlp", "cnn","deep_mlp"])
     parser.add_argument("--batch_size", default=64, help="Batch size")
     parser.add_argument("--epochs", default=500, help="max epochs")
     parser.add_argument("--test_size", default=0.2, help="test split size [0,1]")
     parser.add_argument("--threshold", default=0.3, help="threshold [0,1]")
     parser.add_argument("--lr", default=1e-2, type=float, help="learning rate")
+    parser.add_argument("--weight_decay", default=1e-4, type=float, help="weight decay")
     parser.add_argument("--seed", default=42, help="seed for reproducibility")
     parser.add_argument("--sumary_filename", default="result_sumary.xlsx", help="path to result summary file")
 
     args = parser.parse_args()
+    args.output_dir = f"{args.type_model}-Output"
     main(args)
 

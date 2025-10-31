@@ -53,12 +53,68 @@ class MyDataset(Dataset):
     def __init__(self, X, y,type_model):
         if type_model == 'cnn':
             self.X = torch.tensor(X.values, dtype=torch.float32).unsqueeze(1)  # CNN expects input shape: (B, 1, F)
-        elif type_model == 'mlp':
+        elif type_model in ['mlp',"deep_mlp"]:
             self.X = torch.tensor(X.values, dtype=torch.float32)
         self.y = torch.tensor(y.values, dtype=torch.float32).unsqueeze(1)
 
     def __len__(self): return len(self.X)
     def __getitem__(self, idx): return self.X[idx], self.y[idx]
+
+
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import random
+
+
+class ResidualBlock(nn.Module):
+    def __init__(self, features, dropout=0.2, stochastic_depth_prob=0.0):
+        super().__init__()
+        self.stochastic_depth_prob = stochastic_depth_prob
+        self.block = nn.Sequential(
+            nn.Linear(features, features),
+            nn.BatchNorm1d(features),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(features, features),
+            nn.BatchNorm1d(features)
+        )
+        self.relu = nn.GELU()
+
+    def forward(self, x):
+        if self.training and random.random() < self.stochastic_depth_prob:
+            return x  # skip block (stochastic depth)
+        return self.relu(x + self.block(x))  # residual connection
+
+
+class DeepMLPRegressor(nn.Module):
+    def __init__(self, in_features, hidden_features=128, num_layers=100, dropout=0.2,
+                 stochastic_depth_prob=0.1, use_input_noise=True, noise_std=0.01):
+        super().__init__()
+
+        self.use_input_noise = use_input_noise
+        self.noise_std = noise_std
+
+        self.input_layer = nn.Linear(in_features, hidden_features)
+        self.input_bn = nn.BatchNorm1d(hidden_features)
+        self.relu = nn.GELU()
+
+        # Residual blocks with optional stochastic depth
+        self.res_blocks = nn.Sequential(
+            *[ResidualBlock(hidden_features, dropout, stochastic_depth_prob) for _ in range(num_layers)]
+        )
+
+        # Output layer
+        self.output_layer = nn.Linear(hidden_features, 1)
+
+    def forward(self, x):
+        if self.training and self.use_input_noise:
+            x = x + torch.randn_like(x) * self.noise_std
+
+        x = self.relu(self.input_bn(self.input_layer(x)))
+        x = self.res_blocks(x)
+        x = self.output_layer(x)
+        return x
 
 
 class MLPRegressor(nn.Module):
@@ -91,41 +147,91 @@ class MLPRegressor(nn.Module):
     def forward(self, x): return self.net(x)
 
 
-class CNNRegressor(nn.Module):
-    def __init__(self, input_features):
+
+import torch
+import torch.nn as nn
+
+class ResidualBlock1D(nn.Module):
+    def __init__(self, channels):
         super().__init__()
-        self.cnn = nn.Sequential(
-            nn.Conv1d(1, 1024, kernel_size=3, padding=1),
+        self.block = nn.Sequential(
+            nn.Conv1d(channels, channels, kernel_size=3, padding=1),
             nn.ReLU(),
-
-            nn.Conv1d(1024, 512, kernel_size=3, padding=1),
-            nn.ReLU(),
-
-            nn.Conv1d(512, 256, kernel_size=3, padding=1),
-            nn.ReLU(),
-
-            nn.Conv1d(256, 128, kernel_size=3, padding=1),
-            nn.ReLU(),
-
-
-            nn.Conv1d(128, 64, kernel_size=3, padding=1),
-            nn.ReLU(),
-            nn.AdaptiveAvgPool1d(1),
+            nn.Conv1d(channels, channels, kernel_size=3, padding=1)
         )
+        self.relu = nn.ReLU()
+
+    def forward(self, x):
+        return self.relu(x + self.block(x))  # Residual connection
+
+class CNNRegressor(nn.Module):
+    def __init__(self, input_features, num_blocks=200, start_channels=1024):
+        super().__init__()
+        self.input_layer = nn.Conv1d(1, start_channels, kernel_size=3, padding=1)
+        self.relu = nn.ReLU()
+
+        # Stack multiple residual blocks
+        layers = []
+        channels = start_channels
+        for i in range(num_blocks):
+            layers.append(ResidualBlock1D(channels))
+            # Optionally reduce channels every few blocks
+            if (i + 1) % 20 == 0 and channels > 16:
+                layers.append(nn.Conv1d(channels, channels // 2, kernel_size=1))
+                layers.append(nn.ReLU())
+                channels = channels // 2
+
+        self.cnn = nn.Sequential(*layers)
+        self.pool = nn.AdaptiveAvgPool1d(1)
         self.regressor = nn.Sequential(
             nn.Flatten(),
-            nn.Linear(64, 1)
+            nn.Linear(channels, 1)
         )
 
     def forward(self, x):  # x: (B, 1, F)
+        x = self.relu(self.input_layer(x))
         x = self.cnn(x)
+        x = self.pool(x)
         return self.regressor(x)
+
+
+
+#
+# class CNNRegressor(nn.Module):
+#     def __init__(self, input_features):
+#         super().__init__()
+#         self.cnn = nn.Sequential(
+#             nn.Conv1d(1, 1024, kernel_size=3, padding=1),
+#             nn.ReLU(),
+#
+#             nn.Conv1d(1024, 512, kernel_size=3, padding=1),
+#             nn.ReLU(),
+#
+#             nn.Conv1d(512, 256, kernel_size=3, padding=1),
+#             nn.ReLU(),
+#
+#             nn.Conv1d(256, 128, kernel_size=3, padding=1),
+#             nn.ReLU(),
+#
+#
+#             nn.Conv1d(128, 64, kernel_size=3, padding=1),
+#             nn.ReLU(),
+#             nn.AdaptiveAvgPool1d(1),
+#         )
+#         self.regressor = nn.Sequential(
+#             nn.Flatten(),
+#             nn.Linear(64, 1)
+#         )
+#
+#     def forward(self, x):  # x: (B, 1, F)
+#         x = self.cnn(x)
+#         return self.regressor(x)
 
 
 
 def train_and_evaluate(args, model, train_loader, val_loader, name=""):
     model.to(DEVICE)
-    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
+    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr,weight_decay=args.weight_decay)
     loss_fn = nn.MSELoss()
 
     train_losses, val_losses = [], []
